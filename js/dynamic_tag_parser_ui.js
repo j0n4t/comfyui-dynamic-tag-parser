@@ -1,23 +1,22 @@
 import { app } from "../../scripts/app.js";
 
-// Helper to hide raw config widget from canvas
 function hideWidget(widget) {
     widget.type = "hidden";
     widget.computeSize = () => [0, -4];
     widget.draw = () => { };
 }
 
-// Opens the Tag Manager Modal UI
 function openTagManagerModal(node) {
-    const configWidget = node.widgets?.find(w => w.name === "tags_config");
-    let currentConfigs = [];
-    try {
-        currentConfigs = JSON.parse(configWidget?.value || "[]");
-    } catch (e) {
-        currentConfigs = [];
+    let currentConfigs = node.properties?.tags_config || [];
+    if (!currentConfigs.length) {
+        const configWidget = node.widgets?.find(w => w.name === "tags_config");
+        try {
+            currentConfigs = JSON.parse(configWidget?.value || "[]");
+        } catch (e) {
+            currentConfigs = [];
+        }
     }
 
-    // Modal Dark Overlay
     const overlay = document.createElement("div");
     Object.assign(overlay.style, {
         position: "fixed",
@@ -33,7 +32,6 @@ function openTagManagerModal(node) {
         fontFamily: "sans-serif"
     });
 
-    // Modal Card Window
     const modal = document.createElement("div");
     Object.assign(modal.style, {
         backgroundColor: "#222226",
@@ -60,7 +58,6 @@ function openTagManagerModal(node) {
     `;
     modal.appendChild(header);
 
-    // Rows Container
     const listContainer = document.createElement("div");
     Object.assign(listContainer.style, {
         overflowY: "auto",
@@ -71,7 +68,6 @@ function openTagManagerModal(node) {
         paddingRight: "5px"
     });
 
-    // Helper to calculate the next incremental default name (custom1, custom2, custom3, etc.)
     const getNextCustomName = () => {
         const rows = Array.from(listContainer.children);
         let maxIndex = 0;
@@ -85,14 +81,12 @@ function openTagManagerModal(node) {
             }
         });
 
-        // Fall back to row count + 1 if no customN patterns are detected
         if (maxIndex === 0) {
             return `custom${rows.length + 1}`;
         }
         return `custom${maxIndex + 1}`;
     };
 
-    // Function to append tag row
     const addRow = (config = {}) => {
         const row = document.createElement("div");
         Object.assign(row.style, {
@@ -106,12 +100,10 @@ function openTagManagerModal(node) {
             border: "1px solid #3a3a40"
         });
 
-        // Determine default tag name
         const tagName = config.name !== undefined ? config.name : getNextCustomName();
         const tagType = config.type || "INT";
         const tagDefault = config.default ?? "0";
 
-        // Tag Name Input
         const nameInput = document.createElement("input");
         nameInput.type = "text";
         nameInput.placeholder = "Tag Name";
@@ -125,7 +117,6 @@ function openTagManagerModal(node) {
             fontSize: "12px"
         });
 
-        // Type Dropdown
         const typeSelect = document.createElement("select");
         ["INT", "FLOAT", "STRING", "BOOLEAN"].forEach(t => {
             const opt = document.createElement("option");
@@ -143,7 +134,6 @@ function openTagManagerModal(node) {
             fontSize: "12px"
         });
 
-        // Default Value Input
         const defaultInput = document.createElement("input");
         defaultInput.type = "text";
         defaultInput.placeholder = "Default Value";
@@ -157,7 +147,6 @@ function openTagManagerModal(node) {
             fontSize: "12px"
         });
 
-        // Delete Row Button
         const removeBtn = document.createElement("button");
         removeBtn.textContent = "🗑️";
         removeBtn.title = "Delete Tag";
@@ -193,7 +182,6 @@ function openTagManagerModal(node) {
 
     modal.appendChild(listContainer);
 
-    // Add New Tag Row Button (Triggers incremental auto-naming)
     const addRowBtn = document.createElement("button");
     addRowBtn.textContent = "➕ Add New Tag";
     Object.assign(addRowBtn.style, {
@@ -206,7 +194,7 @@ function openTagManagerModal(node) {
         fontWeight: "bold",
         marginTop: "5px"
     });
-    addRowBtn.onclick = () => addRow(); // Auto-generates custom2, custom3, etc.
+    addRowBtn.onclick = () => addRow();
     modal.appendChild(addRowBtn);
 
     // Modal Footer Controls
@@ -263,8 +251,12 @@ function openTagManagerModal(node) {
     document.body.appendChild(overlay);
 }
 
-// Syncs node outputs and shrinks node dimensions to fit contents tightly
 function applyTagConfigsToNode(node, configs) {
+    if (!configs) configs = [];
+
+    node.properties = node.properties || {};
+    node.properties.tags_config = configs;
+
     const configWidget = node.widgets?.find(w => w.name === "tags_config");
     if (configWidget) {
         configWidget.value = JSON.stringify(configs);
@@ -305,7 +297,6 @@ function applyTagConfigsToNode(node, configs) {
     node.setDirtyCanvas(true, true);
 }
 
-// Register ComfyUI Extension
 app.registerExtension({
     name: "CustomNode.DynamicTagParser",
     async beforeRegisterNodeDef(nodeType, nodeData) {
@@ -316,30 +307,32 @@ app.registerExtension({
             if (origOnNodeCreated) origOnNodeCreated.apply(this, arguments);
 
             const node = this;
+            node.properties = node.properties || {};
 
-            // Hide raw config widget
             let configWidget = node.widgets?.find(w => w.name === "tags_config");
             if (!configWidget) {
                 configWidget = node.addWidget("hidden", "tags_config", "[]", null);
             }
             hideWidget(configWidget);
 
-            // Add Manage Tags UI Button
             node.addWidget("button", "⚙️ Manage Dynamic Tags", null, () => {
                 openTagManagerModal(node);
             });
 
-            // Trim dummy outputs & shrink size on creation
-            let initialConfigs = [];
-            try {
-                initialConfigs = JSON.parse(configWidget.value || "[]");
-            } catch (e) {
-                initialConfigs = [];
+            let configs = node.properties.tags_config;
+            if (!configs && configWidget.value) {
+                try { configs = JSON.parse(configWidget.value); } catch (e) { }
             }
-            applyTagConfigsToNode(node, initialConfigs);
+            applyTagConfigsToNode(node, configs || []);
         };
 
-        // Workflow restoration hook
+        const origOnSerialize = nodeType.prototype.onSerialize;
+        nodeType.prototype.onSerialize = function (info) {
+            if (origOnSerialize) origOnSerialize.apply(this, arguments);
+            info.properties = info.properties || {};
+            info.properties.tags_config = this.properties?.tags_config || [];
+        };
+
         const origOnConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function (info) {
             if (origOnConfigure) origOnConfigure.apply(this, arguments);
@@ -347,14 +340,24 @@ app.registerExtension({
             const configWidget = this.widgets?.find(w => w.name === "tags_config");
             if (configWidget) hideWidget(configWidget);
 
-            if (!configWidget || !configWidget.value) return;
-
-            try {
-                const configs = JSON.parse(configWidget.value);
-                applyTagConfigsToNode(this, configs);
-            } catch (e) {
-                console.error("Error restoring dynamic tag outputs:", e);
+            let configs = info?.properties?.tags_config;
+            if (!configs && configWidget?.value) {
+                try { configs = JSON.parse(configWidget.value); } catch (e) { }
             }
+
+            if (configs) {
+                applyTagConfigsToNode(this, configs);
+            }
+        };
+
+        const origClone = nodeType.prototype.clone;
+        nodeType.prototype.clone = function () {
+            const cloned = origClone ? origClone.apply(this, arguments) : null;
+            if (cloned) {
+                const configs = JSON.parse(JSON.stringify(this.properties?.tags_config || []));
+                applyTagConfigsToNode(cloned, configs);
+            }
+            return cloned;
         };
     }
 });
