@@ -44,12 +44,15 @@ function createElement(tag, className, attributes = {}) {
         if (key === 'textContent' || key === 'innerHTML') {
             el[key] = value;
         } else {
+            // Always set the attribute
             el.setAttribute(key, value);
+
+            // Skip directly setting read-only properties like 'list'
             if (key !== 'list') {
                 try {
                     el[key] = value; // Apply directly for input values, types, etc.
                 } catch (e) {
-                    // Fail silently for any other read-only getters we might hit
+                    // Fail silently for read-only getters
                 }
             }
         }
@@ -280,6 +283,7 @@ function applyTagConfigsToNode(node, configs = []) {
     }
 
     const targetOutputCount = configs.length + 1; // 1 slot for clean_string + dynamic slots
+    const comfyCombos = getComfyUIComboLists();
 
     // Prune excess dynamic slots
     while (node.outputs?.length > targetOutputCount) {
@@ -291,13 +295,17 @@ function applyTagConfigsToNode(node, configs = []) {
         const slotIdx = idx + 1;
         const slotName = `${cfg.name} (${cfg.type})`;
 
+        // If the type is recognized as a known list in ComfyUI, set its linkable type to "COMBO"
+        const isCombo = comfyCombos.hasOwnProperty(cfg.type);
+        const actualType = isCombo ? "COMBO" : cfg.type;
+
         if (node.outputs && slotIdx < node.outputs.length) {
             const output = node.outputs[slotIdx];
             output.name = slotName;
-            output.type = cfg.type;
+            output.type = actualType;
             output.extra_config = cfg;
         } else {
-            node.addOutput(slotName, cfg.type);
+            node.addOutput(slotName, actualType);
             const lastIdx = node.outputs.length - 1;
             node.outputs[lastIdx].extra_config = cfg;
         }
