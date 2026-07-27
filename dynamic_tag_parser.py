@@ -105,16 +105,20 @@ class DynamicTagParser:
                 continue
 
             pattern = fr'<{re.escape(tag_name)}:\s*([^>]+)>'
-            match = re.search(pattern, clean_text, re.IGNORECASE)
+            
+            # Find all occurrences of the tag in the text
+            matches = list(re.finditer(pattern, clean_text, re.IGNORECASE))
 
-            if match:
-                raw_val = match.group(1).strip()
+            if matches:
+                # Extract the value from the LAST match
+                raw_val = matches[-1].group(1).strip()
+                # Remove all occurrences of the tag from the clean_text
                 clean_text = re.sub(pattern, '', clean_text, flags=re.IGNORECASE)
             else:
-                # Trigger the generation logic if the tag was not found in the string[cite: 1]
+                # Trigger the generation logic if the tag was not found in the string
                 raw_val = self._generate_default(default_val, default_mode, tag_name, val_type)
 
-            # Pass raw_val as both the target to cast, and the ultimate fallback[cite: 1]
+            # Pass raw_val as both the target to cast, and the ultimate fallback[cite: 2]
             value = self._cast_value(raw_val, val_type, raw_val)
             parsed_values.append(value)
 
