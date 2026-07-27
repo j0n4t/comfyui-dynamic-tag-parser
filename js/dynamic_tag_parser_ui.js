@@ -45,7 +45,13 @@ function createElement(tag, className, attributes = {}) {
             el[key] = value;
         } else {
             el.setAttribute(key, value);
-            el[key] = value; // Apply directly for input values, types, etc.
+            if (key !== 'list') {
+                try {
+                    el[key] = value; // Apply directly for input values, types, etc.
+                } catch (e) {
+                    // Fail silently for any other read-only getters we might hit
+                }
+            }
         }
     });
     return el;
@@ -70,11 +76,37 @@ function getTagConfigs(node) {
     return currentConfigs;
 }
 
+// Scans ComfyUI for all dynamic combo inputs (Checkpoints, Samplers, etc.)
+function getComfyUIComboLists() {
+    const combos = {};
+    if (typeof window.LiteGraph === "undefined" || !window.LiteGraph.registered_node_types) return combos;
+
+    for (const nodeName in window.LiteGraph.registered_node_types) {
+        const nodeData = window.LiteGraph.registered_node_types[nodeName].nodeData;
+        if (!nodeData || !nodeData.input) continue;
+
+        const allInputs = { ...(nodeData.input.required || {}), ...(nodeData.input.optional || {}) };
+        for (const [inputName, config] of Object.entries(allInputs)) {
+            // Combos in ComfyUI are structured as Arrays of Strings
+            if (Array.isArray(config[0]) && config[0].length > 0 && typeof config[0][0] === "string") {
+                if (!combos[inputName]) {
+                    combos[inputName] = [...config[0]];
+                } else {
+                    // Merge just in case multiple nodes define overlapping lists
+                    combos[inputName] = [...new Set([...combos[inputName], ...config[0]])];
+                }
+            }
+        }
+    }
+    return combos;
+}
+
 // --- CORE LOGIC ---
 
 function openTagManagerModal(node) {
     injectStyles();
     const currentConfigs = getTagConfigs(node);
+    const comfyCombos = getComfyUIComboLists();
 
     const overlay = createElement("div", "dtm-overlay");
     const modal = createElement("div", "dtm-modal");
@@ -87,6 +119,19 @@ function openTagManagerModal(node) {
         `
     });
     modal.appendChild(header);
+
+    // Create a Datalist for the "Type" input to provide autocomplete
+    const dataList = createElement("datalist", "", { id: "dtm-type-list" });
+    const standardTypes = ["INT", "FLOAT", "STRING", "BOOLEAN", "MODEL", "CLIP", "VAE", "LATENT", "IMAGE", "CONDITIONING", "MASK"];
+    const comboTypes = Object.keys(comfyCombos).sort();
+    const allAvailableTypes = [...new Set([...standardTypes, ...comboTypes])];
+
+    allAvailableTypes.forEach(t => {
+        const opt = document.createElement("option");
+        opt.value = t;
+        dataList.appendChild(opt);
+    });
+    modal.appendChild(dataList);
 
     // List Container
     const listContainer = createElement("div", "dtm-list-container");
@@ -106,18 +151,15 @@ function openTagManagerModal(node) {
         const tagName = config.name !== undefined ? config.name : getNextCustomName();
         const tagType = config.type || "INT";
         const tagMode = config.defaultMode || "fixed";
-        const tagDefault = config.default ?? "0";
+        let tagDefault = config.default ?? "0";
 
-        // Inputs
+        // Name
         const nameInput = createElement("input", "dtm-input", { type: "text", placeholder: "Tag Name", value: tagName });
-        const defaultInput = createElement("input", "dtm-input", { type: "text", value: tagDefault });
 
-        // Selectors
-        const typeSelect = createElement("select", "dtm-input");
-        ["INT", "FLOAT", "STRING", "BOOLEAN"].forEach(t => {
-            typeSelect.add(new Option(t, t, false, t === tagType));
-        });
+        // Type (Now a text input connected to a datalist)
+        const typeInput = createElement("input", "dtm-input", { type: "text", value: tagType, list: "dtm-type-list", placeholder: "Type (e.g. STRING)" });
 
+        // Mode
         const modeSelect = createElement("select", "dtm-input");
         const modeOptions = [
             { val: "fixed", text: "Fixed" },
@@ -129,28 +171,62 @@ function openTagManagerModal(node) {
             modeSelect.add(new Option(optData.text, optData.val, false, optData.val === tagMode));
         });
 
-        // Event Listeners
-        const updatePlaceholder = () => {
-            switch (modeSelect.value) {
-                case "random_range": defaultInput.placeholder = "min, max (e.g. 1, 10)"; break;
-                case "list_random":
-                case "list_cycle": defaultInput.placeholder = "item1, item2, item3"; break;
-                default: defaultInput.placeholder = "Default Value";
+        // Dynamic Default Input Container
+        const defaultContainer = createElement("div", "", { style: "width: 100%; min-width: 0; display: flex;" });
+        let defaultInput;
+
+        // Update the Default UI based on whether the Type is a known combo
+        const updateDefaultUI = () => {
+            defaultContainer.innerHTML = '';
+            const currentType = typeInput.value.trim();
+            const currentMode = modeSelect.value;
+            const isCombo = comfyCombos.hasOwnProperty(currentType);
+
+            // If it's a known combo list and mode is fixed, show a dropdown!
+            if (isCombo && currentMode === "fixed") {
+                defaultInput = createElement("select", "dtm-input");
+                const options = comfyCombos[currentType];
+
+                // Sanitize default value if it's completely mismatched
+                if (!options.includes(tagDefault)) {
+                    if (tagDefault === "0" || tagDefault === "") tagDefault = options[0];
+                    else defaultInput.add(new Option(tagDefault, tagDefault, false, true)); // keep custom just in case
+                }
+
+                options.forEach(optVal => {
+                    defaultInput.add(new Option(optVal, optVal, false, optVal === tagDefault));
+                });
+            } else {
+                // Otherwise, show standard text input
+                defaultInput = createElement("input", "dtm-input", { type: "text", value: tagDefault });
+                switch (currentMode) {
+                    case "random_range": defaultInput.placeholder = "min, max (e.g. 1, 10)"; break;
+                    case "list_random":
+                    case "list_cycle": defaultInput.placeholder = "item1, item2, item3"; break;
+                    default: defaultInput.placeholder = "Default Value";
+                }
             }
+
+            // Sync values back to persistent variable to survive UI swaps
+            defaultInput.addEventListener("change", (e) => { tagDefault = e.target.value; });
+            defaultContainer.appendChild(defaultInput);
         };
-        modeSelect.addEventListener("change", updatePlaceholder);
-        updatePlaceholder();
+
+        typeInput.addEventListener("change", updateDefaultUI);
+        typeInput.addEventListener("input", updateDefaultUI);
+        modeSelect.addEventListener("change", updateDefaultUI);
+        updateDefaultUI(); // Init
 
         const removeBtn = createElement("button", "dtm-btn-remove", { textContent: "🗑️", title: "Delete Tag" });
         removeBtn.addEventListener("click", () => row.remove());
 
         // Append to row
-        row.append(nameInput, typeSelect, modeSelect, defaultInput, removeBtn);
+        row.append(nameInput, typeInput, modeSelect, defaultContainer, removeBtn);
 
         // State extraction helper bound to the row
         row.getConfig = () => ({
             name: nameInput.value.trim(),
-            type: typeSelect.value,
+            type: typeInput.value.trim(), // Extracted from text input now
             defaultMode: modeSelect.value,
             default: defaultInput.value.trim()
         });
