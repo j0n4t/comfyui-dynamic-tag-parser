@@ -216,7 +216,11 @@ function openTagManagerModal(node) {
                     if (currentMode === "random_range") {
                         tagDefault = "0, 10";
                     } else if (currentMode.startsWith("list_")) {
-                        tagDefault = "1, 2, 3";
+                        if (upperType === "BOOLEAN") {
+                            tagDefault = "false, true";
+                        } else {
+                            tagDefault = "1, 2, 3";
+                        }
                     } else {
                         if (upperType === "FLOAT") tagDefault = "0.0";
                         else if (upperType === "BOOLEAN") tagDefault = "false";
