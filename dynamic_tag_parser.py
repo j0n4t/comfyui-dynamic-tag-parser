@@ -14,7 +14,7 @@ any_type = AnyType("*")
 
 class DynamicTagParser:
     def __init__(self):
-        # Dictionary to track the current index of 'list_cycle' modes across executions[cite: 1]
+        # Dictionary to track the current index of 'list_cycle' modes across executions
         self.cycle_states = {}
 
     @classmethod
@@ -35,7 +35,7 @@ class DynamicTagParser:
         
     @classmethod
     def IS_CHANGED(cls, text, tags_config="[]"):
-        # Forces ComfyUI to re-evaluate the node every run IF dynamic modes are in use[cite: 1]
+        # Forces ComfyUI to re-evaluate the node every run IF dynamic modes are in use
         try:
             configs = json.loads(tags_config)
             for config in configs:
@@ -51,7 +51,7 @@ class DynamicTagParser:
     CATEGORY = "utils/text"
 
     def _generate_default(self, default_val, default_mode, tag_name, val_type):
-        """Processes the configured default string based on the chosen mode[cite: 1]."""
+        """Processes the configured default string based on the chosen mode."""
         if default_mode == "fixed":
             return default_val
 
@@ -118,7 +118,7 @@ class DynamicTagParser:
                 # Trigger the generation logic if the tag was not found in the string
                 raw_val = self._generate_default(default_val, default_mode, tag_name, val_type)
 
-            # Pass raw_val as both the target to cast, and the ultimate fallback[cite: 2]
+            # Pass raw_val as both the target to cast, and the ultimate fallback
             value = self._cast_value(raw_val, val_type, raw_val)
             parsed_values.append(value)
 

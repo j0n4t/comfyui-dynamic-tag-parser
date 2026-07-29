@@ -44,16 +44,11 @@ function createElement(tag, className, attributes = {}) {
         if (key === 'textContent' || key === 'innerHTML') {
             el[key] = value;
         } else {
-            // Always set the attribute
             el.setAttribute(key, value);
-
-            // Skip directly setting read-only properties like 'list'
             if (key !== 'list') {
                 try {
-                    el[key] = value; // Apply directly for input values, types, etc.
-                } catch (e) {
-                    // Fail silently for read-only getters
-                }
+                    el[key] = value;
+                } catch (e) { }
             }
         }
     });
@@ -79,7 +74,6 @@ function getTagConfigs(node) {
     return currentConfigs;
 }
 
-// Scans ComfyUI for all dynamic combo inputs (Checkpoints, Samplers, etc.)
 function getComfyUIComboLists() {
     const combos = {};
     if (typeof window.LiteGraph === "undefined" || !window.LiteGraph.registered_node_types) return combos;
@@ -90,12 +84,10 @@ function getComfyUIComboLists() {
 
         const allInputs = { ...(nodeData.input.required || {}), ...(nodeData.input.optional || {}) };
         for (const [inputName, config] of Object.entries(allInputs)) {
-            // Combos in ComfyUI are structured as Arrays of Strings
             if (Array.isArray(config[0]) && config[0].length > 0 && typeof config[0][0] === "string") {
                 if (!combos[inputName]) {
                     combos[inputName] = [...config[0]];
                 } else {
-                    // Merge just in case multiple nodes define overlapping lists
                     combos[inputName] = [...new Set([...combos[inputName], ...config[0]])];
                 }
             }
@@ -123,7 +115,7 @@ function openTagManagerModal(node) {
     });
     modal.appendChild(header);
 
-    // Create a Datalist for the "Type" input to provide autocomplete
+    // Datalist for "Type" input autocomplete
     const dataList = createElement("datalist", "", { id: "dtm-type-list" });
     const standardTypes = ["INT", "FLOAT", "STRING", "BOOLEAN", "MODEL", "CLIP", "VAE", "LATENT", "IMAGE", "CONDITIONING", "MASK"];
     const comboTypes = Object.keys(comfyCombos).sort();
@@ -136,7 +128,6 @@ function openTagManagerModal(node) {
     });
     modal.appendChild(dataList);
 
-    // List Container
     const listContainer = createElement("div", "dtm-list-container");
 
     const getNextCustomName = () => {
@@ -154,12 +145,16 @@ function openTagManagerModal(node) {
         const tagName = config.name !== undefined ? config.name : getNextCustomName();
         const tagType = config.type || "INT";
         const tagMode = config.defaultMode || "fixed";
+
+        let previousType = tagType;
+        let previousMode = tagMode;
+        let isDefaultManuallySet = config.default !== undefined;
         let tagDefault = config.default ?? "0";
 
         // Name
         const nameInput = createElement("input", "dtm-input", { type: "text", placeholder: "Tag Name", value: tagName });
 
-        // Type (Now a text input connected to a datalist)
+        // Type
         const typeInput = createElement("input", "dtm-input", { type: "text", value: tagType, list: "dtm-type-list", placeholder: "Type (e.g. STRING)" });
 
         // Mode
@@ -178,29 +173,78 @@ function openTagManagerModal(node) {
         const defaultContainer = createElement("div", "", { style: "width: 100%; min-width: 0; display: flex;" });
         let defaultInput;
 
-        // Update the Default UI based on whether the Type is a known combo
         const updateDefaultUI = () => {
             defaultContainer.innerHTML = '';
             const currentType = typeInput.value.trim();
-            const currentMode = modeSelect.value;
+            const upperType = currentType.toUpperCase();
             const isCombo = comfyCombos.hasOwnProperty(currentType);
 
-            // If it's a known combo list and mode is fixed, show a dropdown!
+            const supportsRandomRange = !isCombo && (upperType === "INT" || upperType === "FLOAT");
+            const hasRandomRangeOption = Array.from(modeSelect.options).some(o => o.value === "random_range");
+
+            if (!supportsRandomRange && hasRandomRangeOption) {
+                for (let i = 0; i < modeSelect.options.length; i++) {
+                    if (modeSelect.options[i].value === "random_range") {
+                        modeSelect.remove(i);
+                        break;
+                    }
+                }
+                if (modeSelect.value === "random_range" || !modeSelect.value) {
+                    modeSelect.value = "fixed";
+                }
+            } else if (supportsRandomRange && !hasRandomRangeOption) {
+                modeSelect.add(new Option("Random Range", "random_range"), 1);
+            }
+
+            const currentMode = modeSelect.value;
+            const modeChanged = currentMode !== previousMode;
+            const typeChanged = currentType !== previousType;
+
+            // 1. Auto-derive default values when type/mode changes, or on fresh init
+            if (modeChanged || typeChanged || (!isDefaultManuallySet && (tagDefault === "0" || tagDefault === ""))) {
+                if (isCombo) {
+                    const options = comfyCombos[currentType];
+                    if (currentMode.startsWith("list_")) {
+                        // Join all options for lists
+                        tagDefault = options.join(", ");
+                    } else if (currentMode === "fixed") {
+                        // Revert to first option for fixed
+                        tagDefault = options.length > 0 ? options[0] : "";
+                    }
+                } else {
+                    // Smart standard fallbacks
+                    if (currentMode === "random_range") {
+                        tagDefault = "0, 10";
+                    } else if (currentMode.startsWith("list_")) {
+                        tagDefault = "1, 2, 3";
+                    } else {
+                        if (upperType === "FLOAT") tagDefault = "0.0";
+                        else if (upperType === "BOOLEAN") tagDefault = "false";
+                        else if (upperType === "STRING") tagDefault = "";
+                        else if (upperType === "INT") tagDefault = "0";
+                        else tagDefault = "";
+                    }
+                }
+            }
+
+            // Sync state history
+            previousType = currentType;
+            previousMode = currentMode;
+
+            // 2. Render UI Element
             if (isCombo && currentMode === "fixed") {
                 defaultInput = createElement("select", "dtm-input");
                 const options = comfyCombos[currentType];
 
-                // Sanitize default value if it's completely mismatched
-                if (!options.includes(tagDefault)) {
-                    if (tagDefault === "0" || tagDefault === "") tagDefault = options[0];
-                    else defaultInput.add(new Option(tagDefault, tagDefault, false, true)); // keep custom just in case
+                // Ensure the value exists before selecting, otherwise retain as a custom option
+                if (!options.includes(tagDefault) && tagDefault !== "") {
+                    defaultInput.add(new Option(tagDefault, tagDefault, false, true));
                 }
 
                 options.forEach(optVal => {
                     defaultInput.add(new Option(optVal, optVal, false, optVal === tagDefault));
                 });
             } else {
-                // Otherwise, show standard text input
                 defaultInput = createElement("input", "dtm-input", { type: "text", value: tagDefault });
                 switch (currentMode) {
                     case "random_range": defaultInput.placeholder = "min, max (e.g. 1, 10)"; break;
@@ -210,8 +254,14 @@ function openTagManagerModal(node) {
                 }
             }
 
-            // Sync values back to persistent variable to survive UI swaps
-            defaultInput.addEventListener("change", (e) => { tagDefault = e.target.value; });
+            // Sync and flag as manually interacted when the user touches the field
+            const markDirty = (e) => {
+                tagDefault = e.target.value;
+                isDefaultManuallySet = true;
+            };
+            defaultInput.addEventListener("change", markDirty);
+            defaultInput.addEventListener("input", markDirty);
+
             defaultContainer.appendChild(defaultInput);
         };
 
@@ -223,13 +273,11 @@ function openTagManagerModal(node) {
         const removeBtn = createElement("button", "dtm-btn-remove", { textContent: "🗑️", title: "Delete Tag" });
         removeBtn.addEventListener("click", () => row.remove());
 
-        // Append to row
         row.append(nameInput, typeInput, modeSelect, defaultContainer, removeBtn);
 
-        // State extraction helper bound to the row
         row.getConfig = () => ({
             name: nameInput.value.trim(),
-            type: typeInput.value.trim(), // Extracted from text input now
+            type: typeInput.value.trim(),
             defaultMode: modeSelect.value,
             default: defaultInput.value.trim()
         });
@@ -239,7 +287,7 @@ function openTagManagerModal(node) {
 
     // Initialize configuration rows
     if (currentConfigs.length === 0) {
-        addRow({ name: "custom1", type: "INT", default: "0" });
+        addRow({ name: "custom1", type: "INT" });
     } else {
         currentConfigs.forEach(addRow);
     }
@@ -282,20 +330,17 @@ function applyTagConfigsToNode(node, configs = []) {
         configWidget.value = JSON.stringify(configs);
     }
 
-    const targetOutputCount = configs.length + 1; // 1 slot for clean_string + dynamic slots
+    const targetOutputCount = configs.length + 1;
     const comfyCombos = getComfyUIComboLists();
 
-    // Prune excess dynamic slots
     while (node.outputs?.length > targetOutputCount) {
         node.removeOutput(node.outputs.length - 1);
     }
 
-    // Update existing slots or append new dynamic slots
     configs.forEach((cfg, idx) => {
         const slotIdx = idx + 1;
         const slotName = `${cfg.name} (${cfg.type})`;
 
-        // If the type is recognized as a known list in ComfyUI, set its linkable type to "COMBO"
         const isCombo = comfyCombos.hasOwnProperty(cfg.type);
         const actualType = isCombo ? "COMBO" : cfg.type;
 
@@ -311,7 +356,6 @@ function applyTagConfigsToNode(node, configs = []) {
         }
     });
 
-    // Recalculate node dimensions back to compact size
     const computed = node.computeSize();
     const defaultWidth = 240;
     node.setSize([Math.max(defaultWidth, computed[0]), computed[1]]);
