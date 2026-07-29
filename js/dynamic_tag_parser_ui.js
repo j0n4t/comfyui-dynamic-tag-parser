@@ -117,7 +117,7 @@ function openTagManagerModal(node) {
 
     // Datalist for "Type" input autocomplete
     const dataList = createElement("datalist", "", { id: "dtm-type-list" });
-    const standardTypes = ["INT", "FLOAT", "STRING", "BOOLEAN", "MODEL", "CLIP", "VAE", "LATENT", "IMAGE", "CONDITIONING", "MASK"];
+    const standardTypes = ["INT", "FLOAT", "STRING", "BOOLEAN"];
     const comboTypes = Object.keys(comfyCombos).sort();
     const allAvailableTypes = [...new Set([...standardTypes, ...comboTypes])];
 
