@@ -379,7 +379,7 @@ app.registerExtension({
 
             this.properties = this.properties || {};
 
-            let configWidget = this.widgets?.find(w => w.name === "tags_config") ||
+            const configWidget = this.widgets?.find(w => w.name === "tags_config") ||
                 this.addWidget("hidden", "tags_config", "[]", null);
 
             hideWidget(configWidget);
@@ -392,13 +392,6 @@ app.registerExtension({
             applyTagConfigsToNode(this, configs || []);
         };
 
-        const origOnSerialize = nodeType.prototype.onSerialize;
-        nodeType.prototype.onSerialize = function (info, ...args) {
-            origOnSerialize?.apply(this, [info, ...args]);
-            info.properties = info.properties || {};
-            info.properties.tags_config = this.properties?.tags_config || [];
-        };
-
         const origOnConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function (info, ...args) {
             origOnConfigure?.apply(this, [info, ...args]);
@@ -407,21 +400,16 @@ app.registerExtension({
             if (configWidget) hideWidget(configWidget);
 
             let configs = info?.properties?.tags_config;
+
+            if (typeof configs === "string") {
+                try { configs = JSON.parse(configs); } catch (e) { configs = []; }
+            }
+
             if (!configs && configWidget?.value) {
                 try { configs = JSON.parse(configWidget.value); } catch (e) { }
             }
 
             if (configs) applyTagConfigsToNode(this, configs);
-        };
-
-        const origClone = nodeType.prototype.clone;
-        nodeType.prototype.clone = function (...args) {
-            const cloned = origClone?.apply(this, args);
-            if (cloned) {
-                const configs = JSON.parse(JSON.stringify(this.properties?.tags_config || []));
-                applyTagConfigsToNode(cloned, configs);
-            }
-            return cloned;
         };
     }
 });
