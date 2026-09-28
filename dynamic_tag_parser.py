@@ -94,6 +94,7 @@ class DynamicTagParser:
             configs = []
 
         parsed_values = []
+        parsed_names = []
 
         for config in configs:
             tag_name = config.get("name", "").strip()
@@ -121,6 +122,7 @@ class DynamicTagParser:
             # Pass raw_val as both the target to cast, and the ultimate fallback
             value = self._cast_value(raw_val, val_type, raw_val)
             parsed_values.append(value)
+            parsed_names.append(tag_name)
 
         # -------------------------------------------------------------
         # ENHANCED COMMA & WHITESPACE CLEANUP
@@ -130,7 +132,12 @@ class DynamicTagParser:
         clean_text = re.sub(r'\s*,\s*$', '', clean_text)
         clean_text = re.sub(r' {2,}', ' ', clean_text).strip()
 
-        return (clean_text, *parsed_values)
+        outputs = (clean_text, *parsed_values)
+        output_metadata = {
+            "clean_string": [clean_text],
+            **{name: [value] for name, value in zip(parsed_names, parsed_values)}
+        }
+        return {"ui": output_metadata, "result": outputs}
 
     def _cast_value(self, value, val_type, default_val):
         try:

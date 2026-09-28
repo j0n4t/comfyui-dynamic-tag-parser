@@ -20,6 +20,8 @@ Extract parameter tags (e.g., `<width:1024>`, `<cfg:7.5>`) directly from prompt 
 * `cfg` (FLOAT) $\rightarrow$ `7.5`
 * `boost` (BOOLEAN) $\rightarrow$ `True`
 
+The execution output also includes each value as a separately named metadata property (`clean_string`, `width`, `cfg`, and `boost`) in ComfyUI's node output data.
+
 
 ## 🚀 How to Use
 
